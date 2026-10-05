@@ -3,6 +3,7 @@ name: Check tools
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -34,3 +35,12 @@ jobs:
           terraform -chdir=infra init -backend=false -lockfile=readonly
           terraform -chdir=infra validate
           terraform -chdir=infra test
+      - name: Check deployment
+        run: |
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff check deploy
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff format --check deploy
+          uv run --no-project --with-requirements lambda/requirements-test.txt pytest -q -p no:cacheprovider deploy/tests
+          bash -n deploy/deploy.sh
+          terraform -chdir=deploy/infra fmt -check
+          terraform -chdir=deploy/infra init -backend=false -lockfile=readonly
+          terraform -chdir=deploy/infra validate

@@ -1,0 +1,92 @@
+name: Deploy Discussion notifier
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discussion-notifier-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VAR_aws_account_id: ${{ vars.NOTIFIER_AWS_ACCOUNT_ID }}
+  TF_VAR_slack_team_id: ${{ vars.NOTIFIER_SLACK_TEAM_ID }}
+  TF_VAR_default_channel_id: ${{ vars.NOTIFIER_CHANNEL_ID }}
+  STATE_BUCKET: ${{ vars.NOTIFIER_STATE_BUCKET }}
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/check.yml
+
+  plan:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+      bundle_sha256: ${{ steps.plan.outputs.bundle_sha256 }}
+    defaults:
+      run:
+        working-directory: discussion-notifier
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check deployment settings
+        run: bash deploy/deploy.sh settings
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@4a1596c86fd706dc0521e32f0121ad1a6d1adb74
+        with:
+          aws-region: ap-northeast-2
+          role-to-assume: ${{ vars.NOTIFIER_PLAN_ROLE_ARN }}
+          role-session-name: notifier-plan-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.NOTIFIER_AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - name: Plan production changes
+        id: plan
+        run: bash deploy/deploy.sh plan
+
+  deploy:
+    needs: plan
+    if: needs.plan.outputs.changes == 'true'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: discussion-notifier
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check deployment settings
+        run: bash deploy/deploy.sh settings
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@4a1596c86fd706dc0521e32f0121ad1a6d1adb74
+        with:
+          aws-region: ap-northeast-2
+          role-to-assume: ${{ vars.NOTIFIER_DEPLOY_ROLE_ARN }}
+          role-session-name: notifier-deploy-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.NOTIFIER_AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - name: Apply approved plan and check Lambda
+        env:
+          BUNDLE_SHA256: ${{ needs.plan.outputs.bundle_sha256 }}
+        run: bash deploy/deploy.sh apply
+      - name: Remove deployment bundle
+        if: always()
+        run: bash deploy/deploy.sh cleanup
