@@ -1,0 +1,36 @@
+name: Check tools
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  discussion-notifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: discussion-notifier
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
+        with:
+          python-version: "3.14"
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - name: Check Python
+        run: |
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff check lambda
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff format --check lambda
+          uv run --no-project --with-requirements lambda/requirements-test.txt pytest -q -p no:cacheprovider -o pythonpath="$PWD/lambda" lambda/tests
+      - name: Check infrastructure
+        run: |
+          terraform -chdir=infra fmt -check -recursive
+          terraform -chdir=infra init -backend=false -lockfile=readonly
+          terraform -chdir=infra validate
+          terraform -chdir=infra test

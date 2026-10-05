@@ -1,0 +1,23 @@
+{
+  "display_information": {
+    "name": "Discussion 알림",
+    "description": "GitHub Discussion의 채널 알림과 개인 DM 설정",
+    "background_color": "#243b53"
+  },
+  "features": {
+    "bot_user": {"display_name": "Discussion 알림", "always_online": false},
+    "slash_commands": [{
+      "command": "/discussion-notify",
+      "description": "개인 DM과 이 채널의 Discussion 알림 설정",
+      "url": "https://REPLACE_WITH_FUNCTION_URL/",
+      "should_escape": false
+    }]
+  },
+  "oauth_config": {"scopes": {"bot": ["chat:write", "commands"]}},
+  "settings": {
+    "interactivity": {"is_enabled": true, "request_url": "https://REPLACE_WITH_FUNCTION_URL/"},
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

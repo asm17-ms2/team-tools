@@ -1,0 +1,5 @@
+infra/.terraform/
+infra/build/
+*.tfstate
+*.tfstate.backup
+__pycache__/

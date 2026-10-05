@@ -1,0 +1,16 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.DS_Store
+**/infra/.terraform/
+**/infra/build/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.json
+*.tfbackend
+*.plan
+.env
+.env.*
+!.env.example
