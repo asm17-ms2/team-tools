@@ -1,10 +1,10 @@
 # 수동 배포 설정
 
-최초 한 번 AWS 배포 역할과 GitHub 설정을 준비한다. 이후 사용법은 [운영 배포](../README.md#운영-배포)를 따른다.
+최초 한 번 AWS 관리 권한으로 배포 역할, Lambda 권한 상한 정책과 GitHub 설정을 준비한다. 이후 사용법은 [운영 배포](../README.md#운영-배포)를 따른다.
 
 ## AWS 역할
 
-1. 운영 계정에 GitHub OIDC 공급자 `token.actions.githubusercontent.com`이 등록돼 있는지 확인한다. 이 정의는 기존 공급자를 조회하며 새로 만들지 않는다.
+1. 운영 계정에 GitHub OIDC 공급자 `token.actions.githubusercontent.com`이 등록돼 있는지 확인한다. 이 정의는 기존 공급자를 조회하며 새로 만들지 않는다. 신뢰 조건은 조직과 저장소 ID가 포함된 OIDC 형식을 사용한다.
 2. `infra/terraform.tfvars.example`과 `infra/backend.s3.tfbackend.example`을 복사하고 실제 값을 입력한다. 운영 Lambda 큐 연결의 UUID는 AWS Lambda 콘솔이나 운영 Terraform 상태에서 확인한다.
 3. 같은 비공개 상태 버킷을 쓰되, 역할 설정의 key는 `team-tools/discussion-notifier-actions/terraform.tfstate`로 지정한다. 운영 리소스의 상태와 구분한다.
 
@@ -19,7 +19,11 @@
 
 - `team-tools-discussion-plan`: `team-tools`의 `main`에서만 사용한다. 운영 리소스 조회, 상태 잠금, 배포 계획 보관 권한을 갖는다.
 - `team-tools-discussion-deploy`: `team-tools`의 `production` 환경에서만 사용한다. 기존 운영 리소스와 상태 파일을 변경한다.
-- 운영 Lambda, 큐, 테이블, 로그 그룹, 실행 역할로 권한을 제한한다. 다른 도구의 리소스, Slack 비밀 조회, 배포 역할 자체의 변경 권한은 주지 않는다.
+- 초기 설정은 역할 2개, 역할별 정책 2개와 `discussion-notifier-runtime-boundary` 정책 1개를 만든다. 권한 상한 정책은 운영 배포가 아닌 이 초기 설정에서 관리한다.
+- 운영 배포는 Lambda 실행 역할에 권한 상한을 연결한다. 상한은 알림 로그 쓰기, SSM 비밀 3개 읽기, 설정 테이블 접근과 알림 큐 송수신을 허용한다. SSM 비밀 복호화는 같은 계정과 리전의 KMS 키로, SSM을 거쳐 지정된 비밀을 읽을 때만 허용한다.
+- Actions는 지정된 상한이 연결된 실행 역할의 정책을 수정할 수 있다. 상한 없이 역할을 만들거나 정책을 수정하는 작업, 상한의 변경과 제거, 실행 역할의 신뢰 정책 변경, 배포 역할 자체의 변경은 차단한다.
+- 상한 확대와 신뢰 정책 변경은 AWS 관리 권한으로 별도 계획을 검토한 뒤 적용한다. 서비스 배포는 수동 Actions 하나를 계속 사용한다.
+- Actions 역할에는 SSM 비밀을 직접 읽는 권한이 없다. Lambda 코드를 배포하면 실행 역할을 통해 지정된 비밀에 접근할 수 있으므로 배포 승인에는 이 접근 권한도 포함된다.
 - 큐 연결을 교체했다면 `event_source_mapping_id`도 갱신하고 역할 계획을 다시 적용한다.
 
 ## GitHub 설정

@@ -41,6 +41,7 @@ jobs:
           uv run --no-project --with-requirements lambda/requirements-test.txt ruff format --check deploy
           uv run --no-project --with-requirements lambda/requirements-test.txt pytest -q -p no:cacheprovider deploy/tests
           bash -n deploy/deploy.sh
-          terraform -chdir=deploy/infra fmt -check
+          terraform -chdir=deploy/infra fmt -check -recursive
           terraform -chdir=deploy/infra init -backend=false -lockfile=readonly
           terraform -chdir=deploy/infra validate
+          terraform -chdir=deploy/infra test

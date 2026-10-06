@@ -19,13 +19,14 @@ variable "event_source_mapping_id" {
 }
 
 locals {
-  account     = var.aws_account_id
-  region      = "ap-northeast-2"
-  name        = "discussion-notifier"
-  state_key   = "${local.name}/terraform.tfstate"
-  bucket_arn  = "arn:aws:s3:::${var.state_bucket}"
-  role_arn    = "arn:aws:iam::${local.account}:role/${local.name}"
-  mapping_arn = "arn:aws:lambda:${local.region}:${local.account}:event-source-mapping:${var.event_source_mapping_id}"
+  account      = var.aws_account_id
+  region       = "ap-northeast-2"
+  name         = "discussion-notifier"
+  state_key    = "${local.name}/terraform.tfstate"
+  bucket_arn   = "arn:aws:s3:::${var.state_bucket}"
+  role_arn     = "arn:aws:iam::${local.account}:role/${local.name}"
+  boundary_arn = "arn:aws:iam::${local.account}:policy/${local.name}-runtime-boundary"
+  mapping_arn  = "arn:aws:lambda:${local.region}:${local.account}:event-source-mapping:${var.event_source_mapping_id}"
   functions = [
     "arn:aws:lambda:${local.region}:${local.account}:function:${local.name}",
     "arn:aws:lambda:${local.region}:${local.account}:function:${local.name}-worker",
@@ -117,7 +118,15 @@ locals {
     },
     {
       Effect   = "Allow"
-      Action   = ["iam:CreateRole", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:TagRole", "iam:UntagRole"]
+      Action   = ["iam:CreateRole", "iam:PutRolePolicy", "iam:PutRolePermissionsBoundary"]
+      Resource = local.role_arn
+      Condition = {
+        StringEquals = { "iam:PermissionsBoundary" = local.boundary_arn }
+      }
+    },
+    {
+      Effect   = "Allow"
+      Action   = ["iam:TagRole", "iam:UntagRole"]
       Resource = local.role_arn
     },
     {
@@ -150,8 +159,8 @@ data "aws_iam_openid_connect_provider" "github" {
 
 resource "aws_iam_role" "actions" {
   for_each = {
-    plan   = "repo:asm17-ms2/team-tools:ref:refs/heads/main"
-    deploy = "repo:asm17-ms2/team-tools:environment:production"
+    plan   = "repo:asm17-ms2@293532363/team-tools@1405328493:ref:refs/heads/main"
+    deploy = "repo:asm17-ms2@293532363/team-tools@1405328493:environment:production"
   }
   name = "team-tools-discussion-${each.key}"
   assume_role_policy = jsonencode({
@@ -176,10 +185,10 @@ resource "aws_iam_role_policy" "actions" {
   role     = each.value.id
   policy = each.key == "deploy" ? jsonencode({
     Version   = "2012-10-17"
-    Statement = concat(local.common_statements, local.deploy_statements)
+    Statement = concat(local.common_statements, local.deploy_statements, local.boundary_protection_statements)
     }) : jsonencode({
     Version   = "2012-10-17"
-    Statement = local.common_statements
+    Statement = concat(local.common_statements, local.boundary_protection_statements)
   })
 }
 
