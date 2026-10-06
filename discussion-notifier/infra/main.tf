@@ -29,7 +29,8 @@ data "archive_file" "lambda" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name = local.name
+  name                 = local.name
+  permissions_boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name}-runtime-boundary"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

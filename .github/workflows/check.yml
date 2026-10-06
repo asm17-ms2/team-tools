@@ -3,6 +3,7 @@ name: Check tools
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,11 +16,11 @@ jobs:
       run:
         working-directory: discussion-notifier
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
         with:
           python-version: "3.14"
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
         with:
           terraform_version: "1.16.4"
           terraform_wrapper: false
@@ -34,3 +35,13 @@ jobs:
           terraform -chdir=infra init -backend=false -lockfile=readonly
           terraform -chdir=infra validate
           terraform -chdir=infra test
+      - name: Check deployment
+        run: |
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff check deploy
+          uv run --no-project --with-requirements lambda/requirements-test.txt ruff format --check deploy
+          uv run --no-project --with-requirements lambda/requirements-test.txt pytest -q -p no:cacheprovider deploy/tests
+          bash -n deploy/deploy.sh
+          terraform -chdir=deploy/infra fmt -check -recursive
+          terraform -chdir=deploy/infra init -backend=false -lockfile=readonly
+          terraform -chdir=deploy/infra validate
+          terraform -chdir=deploy/infra test

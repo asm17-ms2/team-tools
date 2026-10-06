@@ -23,6 +23,10 @@ run "notification_infrastructure" {
   command = plan
 
   assert {
+    condition     = aws_iam_role.lambda.permissions_boundary == "arn:aws:iam::123456789012:policy/discussion-notifier-runtime-boundary"
+    error_message = "Lambda must retain the administrator-managed permissions boundary."
+  }
+  assert {
     condition     = aws_sqs_queue.notifications.visibility_timeout_seconds >= 6 * aws_lambda_function.worker.timeout
     error_message = "SQS visibility timeout must leave time for Lambda retries."
   }

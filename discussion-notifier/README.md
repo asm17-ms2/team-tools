@@ -21,13 +21,26 @@ GitHub Discussion의 채널 알림과 개인 DM 알림을 설정하는 Lambda다
 - 설정은 이후 들어오는 이벤트부터 적용된다. 지난 이벤트를 소급해서 보내지는 않는다.
 - 봇이 발생시킨 이벤트, 삭제, 라벨, 고정, 잠금, 카테고리 변경은 보내지 않는다.
 
+## 운영 배포
+
+1. 변경을 PR로 검증하고 `main`에 병합한다.
+2. GitHub Actions의 `Deploy Discussion notifier`에서 `Run workflow`를 누른다. 브랜치는 `main`을 선택한다.
+3. 테스트가 통과하면 실행 Summary에서 변경할 리소스를 확인한다. 구체적인 변경은 `Plan production changes` 로그에서 확인한다.
+4. 변경이 있으면 `production` 환경의 배포를 승인한다. 승인한 실행의 계획과 Lambda 패키지를 그대로 적용한다.
+5. 배포 단계는 Lambda 2개의 코드 해시와 서명 없는 요청의 401 응답을 확인한다. Slack 알림을 발송하지 않는다.
+
+- push만으로 운영 배포하지 않는다. 변경이 없으면 배포와 승인 단계도 건너뛴다.
+- 기존 S3 상태 `discussion-notifier/terraform.tfstate`를 이어 쓴다. 설정이 그대로인 SQS와 DynamoDB는 재생성하지 않는다.
+- 운영 상태가 없거나 삭제, 교체가 포함된 계획은 중단한다. 이런 변경은 별도 검토 후 로컬 Terraform으로 적용한다.
+- 배포 권한과 GitHub 변수의 최초 설정은 [배포 설정](deploy/README.md)을 따른다.
+
 ## 테스트
 
 Python 3.14, Terraform 1.16 이상이 필요하다. 테스트에서 AWS와 Slack에 전송하지 않는다.
 
 ```sh
 uv run --no-project --python 3.14 --with-requirements lambda/requirements-test.txt \
-  pytest -q -p no:cacheprovider -o pythonpath=lambda lambda/tests
+  pytest -q -p no:cacheprovider -o pythonpath="$PWD/lambda" lambda/tests
 uv run --no-project --python 3.14 --with-requirements lambda/requirements-test.txt \
   ruff check lambda
 terraform -chdir=infra init -backend=false -lockfile=readonly
