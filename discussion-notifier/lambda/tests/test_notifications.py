@@ -39,6 +39,9 @@ from notifications import build_message, destinations, event_types, normalize_se
             {"comment_edited"},
         ),
         ("discussion", payload("answered"), {"answered"}),
+        ("discussion", payload("unanswered"), {"unanswered"}),
+        ("discussion", payload("closed"), {"closed"}),
+        ("discussion", payload("reopened"), {"reopened"}),
     ],
 )
 def test_event_classification(name, data, expected):
@@ -119,13 +122,13 @@ def test_invalid_scope_cannot_subscribe(scope, value):
 def test_message_escapes_mentions_and_limits_preview():
     message = build_message(
         "discussion",
-        payload(discussion=discussion(title="<b> & </b>", body="<!channel>\n" + "나" * 300)),
+        payload(discussion=discussion(title="<b> & </b>", body="<!channel>\n" + "나" * 3000)),
     )
     assert "<!channel>" not in message["text"]
     assert "&lt;!channel&gt;" in message["text"]
     assert "..." in message["text"]
     assert message["unfurl_links"] is False
-    assert message["blocks"][-1]["elements"][0]["value"] == "1"
+    assert message["attachments"][0]["blocks"][-1]["elements"][0]["value"] == "1"
 
 
 def test_answer_links_to_accepted_comment():
@@ -138,5 +141,86 @@ def test_answer_links_to_accepted_comment():
 
 def test_edited_message_uses_editor():
     message = build_message("discussion_comment", payload("edited", comment=comment()))
-    assert "|editor>:" in message["text"]
-    assert "댓글과 답글 수정" in message["text"]
+    assert "댓글 수정: <https://github.com/editor|editor>" in message["text"]
+    assert "작성자: commenter" in message["text"]
+
+
+@pytest.mark.parametrize(
+    "name,data,label,color,author",
+    [
+        ("discussion", payload(), "새 글", "#2DA44E", "author"),
+        ("discussion_comment", payload(comment=comment()), "새 댓글", "#0969DA", "commenter"),
+        (
+            "discussion_comment",
+            payload(comment=comment(parent_id=9)),
+            "새 답글",
+            "#0969DA",
+            "commenter",
+        ),
+        (
+            "discussion",
+            payload("edited", changes={"body": {}, "title": {}}),
+            "본문 수정, 제목 수정",
+            "#BF8700",
+            "editor",
+        ),
+        (
+            "discussion_comment",
+            payload("edited", comment=comment(parent_id=9)),
+            "답글 수정",
+            "#BF8700",
+            "editor",
+        ),
+        ("discussion", payload("answered", answer=comment()), "답변 채택", "#8250DF", "editor"),
+    ],
+)
+def test_card_identifies_event_actor_and_original_link(name, data, label, color, author):
+    message = build_message(name, data)
+    assert (
+        f"{label}: <https://github.com/{author}|{author}>" in message["blocks"][0]["text"]["text"]
+    )
+    card = message["attachments"][0]
+    assert card["color"] == color
+    assert "|#1 롤백 기준이 뭔가요>" in card["blocks"][0]["text"]["text"]
+    assert "o/r | 설계" in card["blocks"][2]["elements"][0]["text"]
+    assert "|GitHub에서 보기>" in card["blocks"][2]["elements"][0]["text"]
+    assert message["parse"] == "none"
+    for block in message["blocks"] + card["blocks"]:
+        text = block.get("text", {})
+        if text.get("type") == "mrkdwn":
+            assert text["verbatim"] is True
+
+
+def test_empty_body_still_has_a_valid_section():
+    message = build_message("discussion", payload(discussion=discussion(body=None)))
+    assert message["attachments"][0]["blocks"][1]["text"]["text"] == "본문이 없습니다."
+
+
+@pytest.mark.parametrize(
+    "action,label,color,status",
+    [
+        ("closed", "닫힘", "#6E7781", "토의가 종료되었습니다."),
+        ("reopened", "재열림", "#2DA44E", "토의가 다시 열렸습니다."),
+    ],
+)
+def test_status_card_shows_actor_and_state_instead_of_repeating_proposal(
+    action, label, color, status
+):
+    message = build_message("discussion", payload(action))
+    assert f"{label}: <https://github.com/editor|editor>" in message["text"]
+    assert "작성자: author" in message["text"]
+    card = message["attachments"][0]
+    assert card["color"] == color
+    assert card["blocks"][1]["text"]["text"] == status
+    assert "본문" not in card["blocks"][1]["text"]["text"]
+
+
+def test_unanswered_card_links_to_old_answer_and_distinguishes_actor_from_author():
+    message = build_message(
+        "discussion", payload("unanswered", old_answer=comment(body="이전 합의 내용"))
+    )
+    assert "채택 취소: <https://github.com/editor|editor>" in message["text"]
+    assert "#discussioncomment-9|이전 답변>의 채택을 취소" in message["text"]
+    assert "이전 합의 내용" in message["text"]
+    assert "작성자: commenter" in message["text"]
+    assert message["attachments"][0]["color"] == "#BF8700"

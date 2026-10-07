@@ -4,7 +4,7 @@ import app
 import boto3
 import pytest
 import worker
-from conftest import payload
+from conftest import comment, payload
 from notifications import DEFAULT_EVENTS
 from store import DeliveryBusy
 
@@ -107,9 +107,26 @@ def test_channel_setting_button_is_only_added_to_channel_messages(store, monkeyp
     worker.dispatch(job(), store, "token")
     channel_message = next(message for message in messages if message["channel"] == "C1")
     dm_message = next(message for message in messages if message["channel"] == "U1")
-    assert channel_message["blocks"][-1]["elements"][-1]["action_id"] == "notify_manage_channel"
-    assert channel_message["blocks"][-1]["elements"][-1]["value"] == "C1"
+    assert (
+        channel_message["attachments"][0]["blocks"][-1]["elements"][-1]["action_id"]
+        == "notify_manage_channel"
+    )
+    assert channel_message["attachments"][0]["blocks"][-1]["elements"][-1]["value"] == "C1"
     assert all(
         button["action_id"] != "notify_manage_channel"
-        for button in dm_message["blocks"][-1]["elements"]
+        for button in dm_message["attachments"][0]["blocks"][-1]["elements"]
     )
+
+
+@pytest.mark.parametrize("action", ["closed", "reopened", "unanswered"])
+def test_default_subscriptions_do_not_receive_status_events(store, monkeypatch, action):
+    store.save("dm", "U1", "all", "", DEFAULT_EVENTS)
+    messages = []
+    monkeypatch.setattr(worker, "call", lambda token, method, **message: messages.append(message))
+    event = {
+        "delivery": "status-event",
+        "event": "discussion",
+        "payload": payload(action, old_answer=comment()),
+    }
+    worker.dispatch(event, store, "token")
+    assert messages == []
