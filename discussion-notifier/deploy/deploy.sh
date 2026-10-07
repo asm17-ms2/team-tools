@@ -52,11 +52,17 @@ elif [[ "$phase" == "apply" ]]; then
   for function in discussion-notifier discussion-notifier-worker; do
     aws lambda wait function-updated-v2 --function-name "$function"
     actual="$(aws lambda get-function-configuration --function-name "$function" --query CodeSha256 --output text)"
-    [[ "$actual" == "$expected" ]] || exit 1
+    if [[ "$actual" != "$expected" ]]; then
+      printf 'Code hash mismatch for %s: expected %s, got %s\n' "$function" "$expected" "$actual" >&2
+      exit 1
+    fi
   done
   url="$(terraform -chdir=infra output -raw function_url)"
   status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{}' "$url")"
-  [[ "$status" == "401" ]] || exit 1
+  if [[ "$status" != "401" ]]; then
+    printf 'Unsigned request verification failed: expected HTTP 401, got %s\n' "$status" >&2
+    exit 1
+  fi
   printf '\nApplied commit `%s`. Both Lambda code hashes match; unsigned requests return 401.\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 else
   exit 1
