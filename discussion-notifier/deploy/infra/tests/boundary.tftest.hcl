@@ -1,4 +1,10 @@
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_data "aws_kms_alias" {
+    defaults = {
+      target_key_arn = "arn:aws:kms:ap-northeast-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    }
+  }
+}
 
 variables {
   aws_account_id          = "123456789012"
@@ -39,6 +45,18 @@ run "bounded_deployment" {
       statement.Effect == "Deny" && !contains(try(statement.NotAction, []), "iam:CreateUser") && can(statement.NotAction)
     ])
     error_message = "The runtime boundary must explicitly deny IAM administration."
+  }
+  assert {
+    condition = anytrue([
+      for statement in jsondecode(aws_iam_policy.runtime_boundary.policy).Statement :
+      statement.Effect == "Allow" &&
+      try(statement.Resource, "") == "arn:aws:kms:ap-northeast-2:123456789012:key/00000000-0000-0000-0000-000000000000" &&
+      try(statement.Condition.StringEquals["kms:EncryptionContext:aws:lambda:FunctionArn"], []) == [
+        "arn:aws:lambda:ap-northeast-2:123456789012:function:discussion-notifier",
+        "arn:aws:lambda:ap-northeast-2:123456789012:function:discussion-notifier-worker",
+      ]
+    ])
+    error_message = "The Lambda default key must decrypt only the two notifier functions' environment variables."
   }
   assert {
     condition     = jsondecode(aws_iam_role.actions["plan"].assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:asm17-ms2@293532363/team-tools@1405328493:ref:refs/heads/main"

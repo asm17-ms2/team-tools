@@ -1,3 +1,7 @@
+data "aws_kms_alias" "lambda" {
+  name = "alias/aws/lambda"
+}
+
 locals {
   secret_parameters = [
     for name in ["github-webhook-secret", "slack-signing-secret", "slack-bot-token"] :
@@ -65,6 +69,14 @@ resource "aws_iam_policy" "runtime_boundary" {
         Condition                                                               = { StringEquals = local.decryption_context }
       } : {})],
       [{
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = data.aws_kms_alias.lambda.target_key_arn
+        Condition = {
+          StringEquals = { "kms:EncryptionContext:aws:lambda:FunctionArn" = local.functions }
+        }
+      }],
+      [{
         Effect    = "Deny"
         NotAction = flatten([for permission in local.runtime_permissions : permission.Action])
         Resource  = "*"
@@ -75,10 +87,21 @@ resource "aws_iam_policy" "runtime_boundary" {
         NotResource = permission.Resource
       }],
       [for key, values in local.decryption_context : {
-        Effect    = "Deny"
-        Action    = ["kms:Decrypt"]
-        Resource  = "*"
-        Condition = { StringNotEquals = { (key) = values } }
+        Effect      = "Deny"
+        Action      = ["kms:Decrypt"]
+        NotResource = data.aws_kms_alias.lambda.target_key_arn
+        Condition   = { StringNotEquals = { (key) = values } }
+      }],
+      [for key, values in local.decryption_context : {
+        Effect   = "Deny"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            (key)                                          = values
+            "kms:EncryptionContext:aws:lambda:FunctionArn" = local.functions
+          }
+        }
       }],
     )
   })
