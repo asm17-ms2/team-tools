@@ -124,4 +124,24 @@ def test_optional_checkboxes_allow_turning_all_events_off():
     view = editor_view("dm", "U1")
     events = next(block for block in view["blocks"] if block.get("block_id") == "events")
     assert events["optional"] is True
-    assert len(events["element"]["options"]) == 7
+    assert len(events["element"]["options"]) == 10
+
+
+@pytest.mark.parametrize("kind,owner", [("dm", "U1"), ("channel", "C1")])
+def test_status_events_are_available_but_not_preselected_for_new_or_existing_rules(
+    kind, owner, store
+):
+    rule = store.save(kind, owner, "all", "", ["created", "answered"])
+    for current in (None, rule):
+        view = editor_view(kind, owner, current)
+        element = next(
+            block["element"] for block in view["blocks"] if block.get("block_id") == "events"
+        )
+        options = {item["value"]: item["text"]["text"] for item in element["options"]}
+        assert options["closed"] == "닫힘"
+        assert options["reopened"] == "재열림"
+        assert options["unanswered"] == "채택 취소"
+        assert not {"closed", "reopened", "unanswered"}.intersection(
+            item["value"] for item in element["initial_options"]
+        )
+    assert store.rules(kind, owner)[0]["events"] == ["answered", "created"]

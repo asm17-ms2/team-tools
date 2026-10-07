@@ -1,7 +1,8 @@
 import json
 import os
 
-from notifications import DEFAULT_EVENTS, EVENTS, SCOPES, escape, normalize_selector
+from formatting import escape
+from notifications import DEFAULT_EVENTS, EVENTS, SCOPES, normalize_selector
 from slack_api import call
 
 MAX_RULES = 24

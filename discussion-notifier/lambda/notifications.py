@@ -1,5 +1,7 @@
 import re
 
+from formatting import body_preview, escaped_excerpt
+
 EVENTS = {
     "created": "새 글",
     "body_edited": "본문 수정",
@@ -8,6 +10,9 @@ EVENTS = {
     "reply_created": "새 답글",
     "comment_edited": "댓글과 답글 수정",
     "answered": "답변 채택",
+    "unanswered": "채택 취소",
+    "closed": "닫힘",
+    "reopened": "재열림",
 }
 DEFAULT_EVENTS = ["created", "comment_created", "reply_created", "answered"]
 SCOPES = {"all": "저장소 전체", "category": "카테고리", "discussion": "특정 글"}
@@ -18,7 +23,7 @@ def event_types(event_name, payload):
         return set()
     action = payload.get("action")
     if event_name == "discussion":
-        if action in ("created", "answered"):
+        if action in ("created", "answered", "unanswered", "closed", "reopened"):
             return {action}
         if action == "edited":
             changes = payload.get("changes", {})
@@ -67,13 +72,8 @@ def destinations(rules, event_name, payload):
     return sorted(matched)
 
 
-def escape(text):
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def excerpt(text):
-    text = re.sub(r"\s+", " ", text or "").strip()
-    return text if len(text) <= 200 else text[:200] + "..."
+def mrkdwn(text):
+    return {"type": "mrkdwn", "text": text, "verbatim": True}
 
 
 def build_message(event_name, payload):
@@ -82,59 +82,73 @@ def build_message(event_name, payload):
         return None
     discussion = payload["discussion"]
     headline = ", ".join(label for key, label in EVENTS.items() if key in types)
-    if "created" in types:
-        headline = "새 Discussion"
-    author = discussion["user"]["login"]
-    body = discussion.get("body")
-    link = discussion["html_url"]
-    prefix = ""
+    content = discussion
     if "answered" in types:
-        answer = payload["answer"]
-        author, body, link = (
-            answer["user"]["login"],
-            answer.get("body"),
-            answer["html_url"],
-        )
-        prefix = f"{escape(payload['sender']['login'])} 님이 <{link}|답변>을 채택\n"
+        content = payload["answer"]
+    elif "unanswered" in types:
+        content = payload["old_answer"]
     elif event_name == "discussion_comment":
-        comment = payload["comment"]
-        author, body, link = (
-            comment["user"]["login"],
-            comment.get("body"),
-            comment["html_url"],
-        )
+        content = payload["comment"]
+        if "comment_edited" in types:
+            headline = "답글 수정" if content.get("parent_id") else "댓글 수정"
+    actor = content["user"] if payload["action"] == "created" else payload["sender"]
+    author = escaped_excerpt(actor["login"], 100)
+    actor_link = f"<https://github.com/{actor['login']}|{author}>"
+    event_line = f"{headline}: {actor_link}"
+    if "answered" in types:
+        event_line += f" 님이 <{content['html_url']}|답변>을 채택"
+    elif "unanswered" in types:
+        event_line += f" 님이 <{content['html_url']}|이전 답변>의 채택을 취소"
+    title = escaped_excerpt(discussion["title"].replace("|", " / "), 250)
+    title_link = f"<{discussion['html_url']}|#{discussion['number']} {title}>"
+    status_text = {"closed": "토의가 종료되었습니다.", "reopened": "토의가 다시 열렸습니다."}
+    body = status_text.get(payload["action"]) or body_preview(content.get("body"))
+    repository = escaped_excerpt(payload["repository"]["full_name"], 200)
+    category = escaped_excerpt(discussion["category"]["name"], 100)
+    metadata = f"{repository} | {category} | <{content['html_url']}|GitHub에서 보기>"
+    if content["user"]["login"] != actor["login"]:
+        metadata += f" | 작성자: {escaped_excerpt(content['user']['login'], 100)}"
+    color = "#2DA44E" if "created" in types else "#0969DA"
     if payload["action"] == "edited":
-        author = payload["sender"]["login"]
-    category = escape(discussion["category"]["name"])
-    title = f"<{discussion['html_url']}|{escape(excerpt(discussion['title']))}>"
-    author_link = f"<{link}|{escape(author)}>" if link != discussion["html_url"] else escape(author)
-    detail = prefix + f"{author_link}: {escape(excerpt(body))}"
+        color = "#BF8700"
+    elif "answered" in types:
+        color = "#8250DF"
+    elif "unanswered" in types:
+        color = "#BF8700"
+    elif "closed" in types:
+        color = "#6E7781"
+    elif "reopened" in types:
+        color = "#2DA44E"
     return {
-        "text": f"[{category}] {headline}: {title}\n{detail}",
+        "text": f"{event_line}\n{title_link}\n{body}\n{metadata}",
         "unfurl_links": False,
         "unfurl_media": False,
-        "blocks": [
+        "parse": "none",
+        "blocks": [{"type": "section", "text": mrkdwn(event_line)}],
+        "attachments": [
             {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"{category} | {headline}"}],
-            },
-            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*"}},
-            {"type": "section", "text": {"type": "mrkdwn", "text": detail}},
-            {
-                "type": "actions",
-                "elements": [
+                "color": color,
+                "blocks": [
+                    {"type": "section", "text": mrkdwn(f"*{title_link}*")},
+                    {"type": "section", "text": mrkdwn(body)},
+                    {"type": "context", "elements": [mrkdwn(metadata)]},
                     {
-                        "type": "button",
-                        "action_id": "notify_follow",
-                        "text": {"type": "plain_text", "text": "이 글 DM 알림 설정"},
-                        "value": str(discussion["number"]),
-                    },
-                    {
-                        "type": "button",
-                        "action_id": "notify_manage_dm",
-                        "text": {"type": "plain_text", "text": "내 DM 설정"},
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "action_id": "notify_follow",
+                                "text": {"type": "plain_text", "text": "이 글 DM 알림"},
+                                "value": str(discussion["number"]),
+                            },
+                            {
+                                "type": "button",
+                                "action_id": "notify_manage_dm",
+                                "text": {"type": "plain_text", "text": "내 DM 설정"},
+                            },
+                        ],
                     },
                 ],
-            },
+            }
         ],
     }

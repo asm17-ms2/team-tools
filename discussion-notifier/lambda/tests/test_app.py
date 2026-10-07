@@ -121,7 +121,19 @@ def test_tampered_slack_body_is_rejected(monkeypatch):
     assert app.handler(request, None)["statusCode"] == 401
 
 
-def test_signed_settings_to_edited_comment_delivery(monkeypatch, store, queued):
+@pytest.mark.parametrize("kind,owner", [("dm", "U1"), ("channel", "C1")])
+@pytest.mark.parametrize(
+    "action,label",
+    [
+        ("edited", "수정한 댓글"),
+        ("closed", "닫힘"),
+        ("reopened", "재열림"),
+        ("unanswered", "이전 합의"),
+    ],
+)
+def test_signed_settings_control_event_delivery(
+    monkeypatch, store, queued, kind, owner, action, label
+):
     monkeypatch.setattr(app.time, "time", lambda: 1000)
     monkeypatch.setattr(app, "Store", lambda: store)
     submission = {
@@ -130,22 +142,40 @@ def test_signed_settings_to_edited_comment_delivery(monkeypatch, store, queued):
         "user": {"id": "U1"},
         "view": {
             "callback_id": "notify_save",
-            "private_metadata": metadata("dm", "U1"),
+            "private_metadata": metadata(kind, owner),
             "state": {
                 "values": {
                     "scope": {"scope": {"selected_option": {"value": "discussion"}}},
                     "selector": {"selector": {"value": "https://github.com/o/r/discussions/1"}},
-                    "events": {"events": {"selected_options": [{"value": "comment_edited"}]}},
+                    "events": {
+                        "events": {
+                            "selected_options": [
+                                {"value": "comment_edited" if action == "edited" else action}
+                            ]
+                        }
+                    },
                 }
             },
         },
     }
     response = app.handler(slack_request({"payload": json.dumps(submission)}), None)
     assert json.loads(response["body"])["response_action"] == "update"
-    data = payload("edited", comment=comment(body="수정한 댓글"))
-    app.handler(github_request("discussion_comment", data), None)
+    data = payload(
+        action, comment=comment(body="수정한 댓글"), old_answer=comment(body="이전 합의")
+    )
+    event_name = "discussion_comment" if action == "edited" else "discussion"
+    assert app.handler(github_request(event_name, data), None)["statusCode"] == 200
     messages = []
     monkeypatch.setattr(worker, "call", lambda token, method, **message: messages.append(message))
     worker.dispatch(queued[0], store, "token")
-    assert [message["channel"] for message in messages] == ["U1"]
-    assert "수정한 댓글" in messages[0]["text"]
+    assert [message["channel"] for message in messages] == [owner]
+    assert label in messages[0]["text"]
+    submission["view"]["state"]["values"]["events"]["events"]["selected_options"] = []
+    response = app.handler(slack_request({"payload": json.dumps(submission)}), None)
+    assert json.loads(response["body"])["response_action"] == "update"
+    assert (
+        app.handler(github_request(event_name, data, delivery="delivery-2"), None)["statusCode"]
+        == 200
+    )
+    worker.dispatch(queued[1], store, "token")
+    assert len(messages) == 1

@@ -1,5 +1,6 @@
 import json
 import os
+from copy import deepcopy
 
 from app import log
 from botocore.exceptions import BotoCoreError, ClientError
@@ -44,17 +45,10 @@ def dispatch(job, store, token):
                 continue
             outgoing = message
             if destination[0] == "channel":
-                outgoing = {
-                    **message,
-                    "blocks": message["blocks"][:-1]
-                    + [
-                        {
-                            **message["blocks"][-1],
-                            "elements": message["blocks"][-1]["elements"]
-                            + [button("notify_manage_channel", "이 채널 설정", destination[1])],
-                        }
-                    ],
-                }
+                outgoing = deepcopy(message)
+                outgoing["attachments"][0]["blocks"][-1]["elements"].append(
+                    button("notify_manage_channel", "채널 설정", destination[1])
+                )
             call(token, "chat.postMessage", channel=destination[1], **outgoing)
             store.complete(job["delivery"], destination)
         except (BotoCoreError, ClientError, RuntimeError) as error:
